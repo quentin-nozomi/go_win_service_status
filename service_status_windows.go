@@ -2,40 +2,78 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"golang.org/x/sys/windows/svc"
 
-	"github.com/shirou/gopsutil/winservices"
+	"service_status/winservicemanager"
 )
 
+func getState(service *winservicemanager.ManagedService) (svc.State, error) {
+	status, err := service.QueryStatus()
+	if err != nil {
+		return svc.Stopped, err
+	}
+	return status.State, nil
+}
+
 func get() {
-	service, err := winservices.NewService("Arc")
+	service, err := winservicemanager.NewManagedService("Arc")
 	if err != nil {
 		fmt.Println("NewService error", err)
 		return
 	}
-	status, err := service.QueryStatus()
+
+	state, _ := getState(service)
+	printState(state)
+
+	fmt.Println("requesting stop")
+	// https://learn.microsoft.com/en-us/windows/win32/api/winsvc/nf-winsvc-controlservice
+	control, err := service.Srv.Control(svc.Stop)
 	if err != nil {
-		fmt.Println("QueryStatus error", err)
-		return
+		fmt.Println("stop error:", err)
+	}
+	fmt.Print("returned status (stop request): ")
+	printState(control.State)
+
+	// poll for 1 min, this is not interruptible
+	for i := 0; i < 12; i++ {
+		time.Sleep(5 * time.Second)
+		state, _ = getState(service)
+		printState(state)
+		if state == svc.Stopped {
+			break
+		}
 	}
 
-	switch status.State {
+	state, _ = getState(service)
+	printState(state)
+
+	fmt.Println("Request start")
+	startErr := service.Srv.Start()
+	if startErr != nil {
+		fmt.Println("Start err:", err)
+		return
+	}
+}
+
+func printState(state svc.State) string {
+	switch state {
 	case svc.Stopped:
-		fmt.Println("Stopped")
+		return "Stopped"
 	case svc.StartPending:
-		fmt.Println("StartPending")
+		return "StartPending"
 	case svc.StopPending:
-		fmt.Println("StopPending")
+		return "StopPending"
 	case svc.Running:
-		fmt.Println("Running")
+		return "Running"
 	case svc.ContinuePending:
-		fmt.Println("ContinuePending")
+		return "ContinuePending"
 	case svc.PausePending:
-		fmt.Println("PausePending")
+		return "PausePending"
 	case svc.Paused:
-		fmt.Println("Paused")
+		return "Paused"
 	default:
-		fmt.Println("unknown state")
+		return "unknown state"
 	}
 }
